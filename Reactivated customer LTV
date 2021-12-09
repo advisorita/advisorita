@@ -1,0 +1,54 @@
+--Reactivated customer LTV order cohort
+with order_iid_status as 
+(select
+d.*,
+case when  d.order_date= d.create_date
+          then 'New'
+    when d.order_date > date_add(lag(d.order_date) over (partition by d.iid order by d.order_date), interval 365 day) --comparing to the next record
+                        
+          then 'Reactivated'
+     else 'Returning'
+    end as customer_status
+from
+(select 
+    distinct oh.iid,
+    i.create_date,
+    i.gender_type_cd,
+    oh.order_date, 
+    oh.Sales,
+    ROW_NUMBER() OVER(PARTITION BY oh.iid order by oh.order_date ) as order_Num
+  from `merkle-lake-hbft-user.analytics.vw_order_header` oh
+   join `merkle-lake-hbft-user.analytics.vw_indiv` i
+      on oh.IID = i.IID
+  where 
+    i.create_date<= oh.order_date
+    --and DATE_TRUNC(oh.Order_Date,WEEK(MONDAY)) >= date_add(current_date(),interval -1460 /*four years*/ DAY) -- 1095 looking at past three years data
+    and oh.IID > 0
+    and upper(oh.Order_Status) != 'CANCELLED'
+    and oh.sales is not null -- excluding null sales 
+    --and oh.iid=100000000084807 --this iid created 2020-09 but the only order sales was null
+  order by 1,2,3 desc
+--limit 1000000
+)d
+)
+select 
+distinct
+    i.iid,
+    i.reactivated_date,
+    sum(case when r.order_date=i.reactivated_date then r.Sales end) as LTV_0_Day,
+    sum(case when r.order_date<=date_add(i.reactivated_date,interval 7 day) then r.Sales end) as LTV_7_Day,
+    sum(case when r.order_date<=date_add(i.reactivated_date,interval 14 day) then r.Sales end) as LTV_14_Day,
+    sum(case when r.order_date<=date_add(i.reactivated_date,interval 21 day) then r.Sales end) as LTV_21_Day,
+    sum(case when r.order_date<=date_add(i.reactivated_date,interval 30 day) then r.Sales end) as LTV_30_Day,
+    sum(r.Sales) as total_sales
+from 
+    (select 
+        distinct r.iid,r.order_date as reactivated_date
+        from order_iid_status r
+     where r.customer_status='Reactivated'
+     ) i
+join order_iid_status r 
+    on r.iid=i.iid and r.order_date>=i.reactivated_date -- only looking at orders after reactivated date
+where extract(year from i.reactivated_date)>=2019 
+group by 1,2
+;

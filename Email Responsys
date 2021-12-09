@@ -1,0 +1,267 @@
+--Email Engagement data
+/*With EM_EventIndex AS
+(
+SELECT
+  DISTINCT
+  e.event_index_version_number , e.event_name, e.in_home_Date
+FROM
+  `merkle-lake-hbft-user.analytics.vw_event` e
+WHERE
+  e.in_home_date >= date_add(date_trunc(current_date(),WEEK), interval -3 month) 
+  and e.event_type = 'Email'
+)*/
+SELECT
+  distinct 
+  case when od.event_index= '172325' then '172328' else od.event_index end as event_index
+  ,od.campaign_id
+  ,od.campaign_name
+  ,ph.marketing_strategy
+  ,ph.sent_date
+  ,ph.Unique_iid_sent
+  ,ph.Unique_Sent
+  ,ph.Total_Sent
+  ,ib.Unique_iid_opens
+  ,ib.Unique_Opens
+  ,ib.Open_Count
+  ,ibc.Unique_ClickThru
+  ,ibc.ClickThru_Count
+  ,sb.Unique_Soft_Bounces
+  ,sb.Soft_Bounces
+  ,hb.Unique_Hard_Bounces
+  ,hb.Hard_Bounces
+  ,oo.Unique_Opt_Outs
+  ,oo.Opt_Out
+  ,od.Sales_AfterOpen_wEmail_iid
+  ,od.GP_wEmail_iid
+  ,od.email_iid as email_iid_open_w_sales
+FROM
+  (
+ ------email campaign open w sales --------------------
+select *
+from `merkle-lake-hbft-user.analytics.Email_Campaign_Open_wSales`
+) as od
+------------- promo sent ------------
+RIGHT JOIN
+  (
+  SELECT distinct ls.event_index, ls.campaign_id, ls.campaign_name ,ls.marketing_strategy,
+    min(ph.event_date) as sent_date,
+    COUNT(DISTINCT ph.iid) AS Unique_iid_sent,
+    COUNT(DISTINCT ph.elctr_addr) AS Unique_Sent,
+    COUNT(ph.elctr_addr) AS Total_Sent
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_promo_history` ph
+  INNER JOIN
+    (
+    SELECT
+      DISTINCT ls.external_campaign_id as event_index, ls.campaign_name ,
+      ls.campaign_id, ls.marketing_strategy
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+    WHERE
+      lower(ls.campaign_name) NOT LIKE '%seed%' 
+    ) AS ls
+  ON
+    ph.campaign_id = ls.campaign_id
+  WHERE
+    ph.event_type_desc = 'Outbound Email Event' 
+      and RTRIM(LTRIM(UPPER(ph.elctr_addr))) != 'UNKNOWN' and RTRIM(LTRIM(UPPER(ph.elctr_addr))) is not null
+      and ph.event_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month)
+group by 1,2,3,4
+) AS ph
+on od.campaign_id = ph.campaign_id 
+---------- open count ------------------
+LEFT JOIN 
+  (
+  SELECT distinct ls.event_index, ls.campaign_id ,ls.campaign_name ,
+  COUNT(DISTINCT ib.iid) AS Unique_iid_opens,
+  COUNT(DISTINCT ib.elctr_addr) AS Unique_Opens,
+  COUNT(ib.elctr_addr) AS Open_Count
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_inbd_event` ib
+  INNER JOIN
+    (
+     SELECT
+      DISTINCT ls.external_campaign_id  as event_index, ls.campaign_name ,
+      ls.campaign_id
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+    WHERE
+      lower(ls.campaign_name) NOT LIKE '%seed%' 
+    ) AS ls
+  ON
+    ib.campaign_id = ls.campaign_id
+  WHERE
+    ib.event_type_desc in ('Open') 
+      and RTRIM(LTRIM(UPPER(ib.elctr_addr))) != 'UNKNOWN' and RTRIM(LTRIM(UPPER(ib.elctr_addr))) is not null
+            and ib.event_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month)
+group by 1,2,3
+) AS ib
+on ph.campaign_id = ib.campaign_id and ph.campaign_name = ib.campaign_name
+
+--------click through count --------------------------------
+LEFT JOIN 
+  (
+  SELECT distinct ls.event_index, ls.campaign_id, ls.campaign_name ,
+  COUNT(DISTINCT ib.iid) AS Unique_iid_ClickThru,
+  COUNT(DISTINCT ib.elctr_addr) AS Unique_ClickThru,
+  COUNT(ib.elctr_addr) AS ClickThru_Count
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_inbd_event` ib
+  INNER JOIN
+    (
+    SELECT
+      DISTINCT ls.external_campaign_id  as event_index, ls.campaign_name ,
+      ls.campaign_id
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+  
+    WHERE
+      lower(ls.campaign_name) NOT LIKE '%seed%' 
+    ) AS ls
+  ON
+    ib.campaign_id = ls.campaign_id
+  WHERE
+    ib.event_type_desc in ('Click Through') 
+      and RTRIM(LTRIM(UPPER(ib.elctr_addr))) != 'UNKNOWN' and RTRIM(LTRIM(UPPER(ib.elctr_addr))) is not null
+            and ib.event_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month)
+group by 1,2,3
+) AS ibc
+on ph.campaign_id = ibc.campaign_id  and ph.campaign_name = ib.campaign_name
+--------Soft Bounce count --------------------------------
+LEFT JOIN 
+  (
+  SELECT distinct ls.event_index, ls.campaign_id, ls.campaign_name ,
+  COUNT(DISTINCT ib.elctr_addr) AS Unique_Soft_Bounces,
+  COUNT(ib.elctr_addr) AS Soft_Bounces
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_inbd_event` ib
+  INNER JOIN
+    (
+     SELECT
+      DISTINCT ls.external_campaign_id  as event_index, ls.campaign_name ,
+      ls.campaign_id
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+    WHERE
+      lower(ls.campaign_name) NOT LIKE '%seed%' 
+    ) AS ls
+  ON
+    ib.campaign_id = ls.campaign_id
+  WHERE
+    ib.event_type_desc in ('Soft Bounce') 
+      and RTRIM(LTRIM(UPPER(ib.elctr_addr))) != 'UNKNOWN' and RTRIM(LTRIM(UPPER(ib.elctr_addr))) is not null
+                  and ib.event_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month)
+group by 1,2,3
+) AS sb
+on ph.campaign_id = sb.campaign_id  and ph.campaign_name = sb.campaign_name
+--------Hard Bounce count --------------------------------
+LEFT JOIN 
+  (
+  SELECT distinct ls.event_index, ls.campaign_id , ls.campaign_name ,
+  COUNT(DISTINCT ib.elctr_addr) AS Unique_Hard_Bounces,
+  COUNT(ib.elctr_addr) AS Hard_Bounces
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_inbd_event` ib
+  INNER JOIN
+    (
+    SELECT
+      DISTINCT ls.external_campaign_id  as event_index, ls.campaign_name ,
+      ls.campaign_id
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+    WHERE
+      lower(ls.campaign_name) NOT LIKE '%seed%' 
+    ) AS ls
+  ON
+    ib.campaign_id = ls.campaign_id
+  WHERE
+    ib.event_type_desc in ('Hard Bounce') 
+      and RTRIM(LTRIM(UPPER(ib.elctr_addr))) != 'UNKNOWN' and RTRIM(LTRIM(UPPER(ib.elctr_addr))) is not null
+                  and ib.event_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month)
+group by 1,2,3
+) AS hb
+on ph.campaign_id = hb.campaign_id and ph.campaign_name = hb.campaign_name
+--------Opt Out count --------------------------------
+LEFT JOIN 
+  (
+  SELECT distinct ls.event_index, ls.campaign_id, ls.campaign_name ,
+  COUNT(DISTINCT ib.elctr_addr) AS Unique_Opt_Outs,
+  COUNT(ib.elctr_addr) AS Opt_Out
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_inbd_event` ib
+  INNER JOIN
+    (
+     SELECT
+      DISTINCT ls.external_campaign_id  as event_index, ls.campaign_name ,
+      ls.campaign_id
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+    WHERE
+      lower(ls.campaign_name) NOT LIKE '%seed%' 
+    ) AS ls
+  ON
+    ib.campaign_id = ls.campaign_id
+  WHERE
+    ib.event_type_desc in ('Opt Out') 
+      and RTRIM(LTRIM(UPPER(ib.elctr_addr))) != 'UNKNOWN' and RTRIM(LTRIM(UPPER(ib.elctr_addr))) is not null
+                  and ib.event_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month)
+group by 1,2,3
+) AS oo
+on ph.campaign_id = oo.campaign_id  and ph.campaign_name = oo.campaign_name
+/*where regexp_contains(lower(ph.campaign_name),'engaged')
+      and not regexp_contains(lower(ph.campaign_name),'unengaged')*/
+where ph.sent_date >= date_add(date_trunc(current_date(),WEEK), interval -12 month) 
+;
+
+
+--Email Open with Sales
+select distinct 
+case when tt.event_index= '172325' then '172328' else tt.event_index end as event_index,
+tt.campaign_id, tt.campaign_name, sum(tt.tickets) as tickets,
+sum(tt.Sales) as Sales_AfterOpen_wEmail_iid, sum(tt.gross_profit) as GP_wEmail_iid, count(distinct tt.iid) as Email_iid
+/*,sum(tt.sales)/count(distinct tt.iid) as avg_sales, stddev_samp(tt.sales) as std_sales, sum(tt.gross_profit)/count(distinct tt.iid) as avg_gp, stddev_samp(tt.gross_profit) as std_gp*/
+from (
+SELECT 
+  distinct  ls.event_index, ls.campaign_id,ls.campaign_name, ib.iid, 
+    sum(oh.sales) as sales, sum(oh.gross_profit) as gross_profit, count(oh.Order_ID) as tickets
+  FROM
+    `merkle-lake-hbft-user.analytics.vw_inbd_event` ib 
+  INNER JOIN
+    (
+    SELECT
+      DISTINCT ls.external_campaign_id  as event_index,
+      ls.campaign_id,ls.campaign_name 
+    FROM
+      `merkle-lake-hbft-user.analytics.vw_lkp_responsys_launch_state` ls
+ WHERE
+      ls.campaign_name NOT LIKE '%Seed%' 
+    ) AS ls
+  ON
+    ib.campaign_id = ls.campaign_id
+    /*JOIN `merkle-lake-hbft-user.analytics.vw_promo_history` ph
+  ON
+    ib.campaign_id = ph.campaign_id*/
+    LEFT JOIN 
+      `merkle-lake-hbft-user.analytics.vw_order_header` oh
+  ON coalesce(ib.iid,0) = coalesce(oh.iid,0)
+  WHERE
+   /* ls.campaign_name like '2020_05_08_%'
+    and*/
+    /*
+    ph.event_date >= date_add(date_trunc(current_date(),WEEK), interval -3 month)
+    and*/
+    lower(oh.Order_Status) != 'cancelled'
+    and 
+    ib.event_date >= date_add(date_trunc(current_date(),WEEK), interval -2 month)
+    and
+    lower(ib.event_type_desc)='open'
+    and
+    ib.iid >1 
+    and
+    ib.event_date <= oh.order_date
+    and ib.event_date >= date_add(oh.order_date,interval -6 day) --$22.8M from Open Date and 4 days after open date for the Presidents' Day email campaign 
+    and ib.elctr_addr is not null and LTRIM(RTRIM(UPPER(ib.elctr_addr)))!='UNKNOWN' 
+ group by 1,2,3,4
+ ) tt
+ group by 1,2,3
+;

@@ -1,0 +1,54 @@
+--new customer LTV order cohort
+with order_iid_status as 
+(select
+d.*,
+case when  d.order_date= d.create_date
+          then 'New'
+    when d.order_date > date_add(lag(d.order_date) over (partition by d.iid order by d.order_date), interval 365 day) --comparing to the next record
+                        
+          then 'Reactivated'
+     else 'Returning'
+    end as customer_status
+from
+(select 
+    distinct oh.iid,
+    i.create_date,
+    i.gender_type_cd,
+    oh.order_date, 
+    oh.Sales,
+    ROW_NUMBER() OVER(PARTITION BY oh.iid order by oh.order_date ) as order_Num
+  from `merkle-lake-hbft-user.analytics.vw_order_header` oh
+   join `merkle-lake-hbft-user.analytics.vw_indiv` i
+      on oh.IID = i.IID
+  where 
+    i.create_date<= oh.order_date
+    --and DATE_TRUNC(oh.Order_Date,WEEK(MONDAY)) >= date_add(current_date(),interval -1095 DAY) -- looking at past three years data
+    and oh.IID > 0
+    and upper(oh.Order_Status) != 'CANCELLED'
+    and oh.sales is not null -- excluding sales that's null
+    --and oh.iid=100000000084807 --this iid created 2020-09 but the only order sales was null
+  order by 1,2,3 desc
+--limit 1000000
+)d
+)
+select 
+distinct
+    i.iid,
+    i.create_date,
+    sum(case when r.order_date=i.create_date then r.Sales end) as LTV_0_Day,
+    sum(case when r.order_date<=date_add(i.create_date,interval 7 day) then r.Sales end) as LTV_7_Day,
+    sum(case when r.order_date<=date_add(i.create_date,interval 14 day) then r.Sales end) as LTV_14_Day,
+    sum(case when r.order_date<=date_add(i.create_date,interval 21 day) then r.Sales end) as LTV_21_Day,
+    sum(case when r.order_date<=date_add(i.create_date,interval 30 day) then r.Sales end) as LTV_30_Day,
+    sum(r.Sales) as total_sales
+from 
+    (select 
+        distinct r.iid,r.create_date 
+        from order_iid_status r
+     where r.customer_status='New'
+     ) i
+join order_iid_status r 
+    on r.iid=i.iid
+where extract(year from i.create_date) >= 2019
+group by 1,2
+;

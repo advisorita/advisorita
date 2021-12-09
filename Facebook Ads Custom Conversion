@@ -1,0 +1,51 @@
+-- FACEBOOK ADS CUSTOM CONVERSION DATA
+-- transform table to one row per ad_id, per day
+with existing as
+(
+select distinct 
+ad_id, date, sum(actions) as Purchase_ExistingCustomer_Conversions, sum(action_value) as Purchase_ExistingCustomer_Conversion_value 
+from analytics.facebook_conversion_28_all_columns 
+where action_type =/*existing*/ 'offline_conversion.custom.1042821186082559'
+group by 1,2
+)
+select 
+    'Facebook' as Platform,
+    coalesce(cast(fcc.ad_id as int64), 
+    cast(fcn.ad_id as int64),cast(fce.ad_id as int64) ) as Ad_Id, 
+    coalesce(fcc.date, fcn.date ,fce.date) as date,
+    fcc.Purchase_ExistingCustomer_Conversions, fcc.Purchase_ExistingCustomer_Conversion_value, 
+    fcn.Purchase_NewCustomer_Conversions ,fcn.Purchase_NewCustomer_Conversion_value , 
+    fcr.Purchase_Reactivated_Conversions , fcr.Purchase_Reactivated_Conversion_value ,
+    fce.PLCC_Conversions  , fce.PLCC_Conversion_value,
+NULL AS Store_Sales_Conversions, NULL AS Store_Sales_Conversion_value    
+from existing fcc
+full outer join 
+(
+select distinct ad_id, date, sum(actions) as Purchase_NewCustomer_Conversions, sum(action_value) as Purchase_NewCustomer_Conversion_value 
+from analytics.facebook_conversion_28_all_columns 
+where action_type =/*new*/ 'offline_conversion.custom.173994160646317'
+group by 1,2
+) fcn
+on fcc.ad_id = fcn.ad_id and fcc.date = fcn.date 
+full outer join 
+(
+select distinct
+fcc.ad_id, fcc.date, sum(fcc.actions) as PLCC_Conversions, sum(fcc.action_value) as PLCC_Conversion_value 
+from analytics.facebook_conversion_28_all_columns fcc
+where fcc.action_type =/*plcc*/ 'offline_conversion.custom.623364625264311'
+group by 1,2
+) fce
+on fcc.ad_id = fce.ad_id and fcc.date = fce.date 
+full outer join 
+(
+select distinct
+fcc.ad_id, fcc.date, sum(fcc.actions) as Purchase_Reactivated_Conversions, sum(fcc.action_value) as Purchase_Reactivated_Conversion_value 
+from analytics.facebook_conversion_28_all_columns fcc
+where fcc.action_type =/*reactivated*/ 'offline_conversion.custom.862735841336667'
+group by 1,2
+) fcr
+on fcc.ad_id = fcr.ad_id and fcc.date = fcr.date 
+
+--where fcc.campaign_id = '23845025096420618'
+order by fcc.date desc
+;

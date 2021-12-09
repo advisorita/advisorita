@@ -1,0 +1,89 @@
+/*
+select * from `merkle-lake-hbft-user.analytics.AdBasicStats_8099319219` a
+where a.CampaignId  = 1398685905 and a.Date >='2020-10-01'
+order by a.date
+;*/
+
+--Google & FB  campaign, adgroup, ad stats
+select distinct 
+'Google' as platform,
+a.Date,
+a.CampaignId,
+c.CampaignName,
+c.AdvertisingChannelType as Campaign_Type,
+a.AdGroupId,
+ag.AdGroupName,
+a.CreativeId as AdId,
+ad.Description as Ad_Name,
+c.CampaignStatus as campaign_status,
+c.StartDate as campaign_start_date,
+c.EndDate as campaign_end_date,
+c.AdvertisingChannelType as ad_type,
+--Adding video views
+v.VideoId,
+sum(v.VideoViews) as VideoViews,
+sum(a.Cost) / 1000000 as cost,
+sum(a.Impressions) as impressions,
+sum(a.Clicks) as clicks,
+sum(a.ConversionValue) as online_conversion_value,
+sum(a.Conversions) as conversions,
+cast(regexp_extract(c.CampaignName, '\\((\\d{6})\\)') as int64) as event_index
+from `merkle-lake-hbft-user.analytics.AdBasicStats_8099319219` a
+inner join 
+  (select distinct ad.CreativeId, ad.Description from `merkle-lake-hbft-user.analytics.Ad_8099319219` ad
+   where ad._LATEST_DATE = ad._DATA_DATE) ad
+  on a.CreativeId = ad.CreativeId 
+inner join 
+  (select distinct AdGroupID, CampaignId, AdGroupName from `merkle-lake-hbft-user.analytics.AdGroup_8099319219` ag
+   where ag._LATEST_DATE = ag._DATA_DATE) ag
+  on a.AdGroupId  = ag.AdGroupId 
+inner join 
+  (select distinct CampaignId, CampaignName, CampaignStatus, StartDate, EndDate, AdvertisingChannelType
+   from `merkle-lake-hbft-user.analytics.Campaign_8099319219` c
+   where c._LATEST_DATE = c._DATA_DATE) c
+  on a.CampaignId = c.CampaignId 
+--to get youtube stats
+left join `merkle-lake-hbft-user.analytics.google_youtube_views` v
+on 
+a.CreativeId=v.CreativeId and a.Date=v.Date and a.AdGroupId=v.AdGroupId
+where a.Date >= '2019-06-01'
+group by 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ,12, 13 ,14
+union all
+select distinct 
+'Facebook' as platform,
+fa.date as date,
+cast(fa.campaign_id as int64) as CampaignId,
+fc.campaign_name as CampaignName, -- one campaignid could have multiple campaign names due to revision
+'facebook ads' as Campaign_Type,
+cast(fa.ad_group_id as int64) as AdGroupId,
+fa.ad_group_name as AdGroupName,
+cast(fa.ad_id as int64) as AdID,
+fa.ad_name as Ad_Name,
+case when fa.campaign_status = 'ACTIVE' then 'ENABLED' else fa.campaign_status end as campaign_status,
+fa.campaign_start_date as campaign_start_date,
+fa.campaign_end_date as campaign_end_date,
+'FACEBOOK' as ad_type,
+--FB video id
+rtrim(ltrim(SPLIT((SPLIT(fa.Ad_Name, 'ID:')[safe_ordinal(2)] ),' -')[safe_ordinal(1)])) AS VideoId,
+0 as VideoViews,
+sum(fa.cost) as cost,
+sum(fa.impressions) as impressions,
+sum(fa.clicks) as clicks,
+sum(fa.offsite_conversion_value_fb_pixel_purchase) as online_conversion_value,
+sum(fa.offsite_conversions_fb_pixel_purchase) as conversions,
+cast(regexp_extract(fc.campaign_name, '\\((\\d{6})\\)') as int64) as event_index
+from `merkle-lake-hbft-user.FacebookAds.FBADS_AD_*` fa
+inner join 
+-- FB table retained historical campaign names on stats data. this is to get the latest campaign name to date for each campaign id.
+(select campaign_id, campaign_name from
+  (select distinct 
+           fc.campaign_id,
+           fc.campaign_name, 
+           row_number()over(partition by fc.campaign_id order by fc.date desc) as rn
+    from `merkle-lake-hbft-user.analytics.facebook_campaign`fc
+    )
+  where rn=1
+) fc 
+on fa.campaign_id  = fc.campaign_id
+where fa.date >= '2019-06-01'
+group by 2, 3, 4, 5, 6, 7, 8 , 9, 10, 11 , 12, 13,14

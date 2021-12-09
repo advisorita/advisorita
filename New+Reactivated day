@@ -1,0 +1,53 @@
+-- new customers : order_date = create_date 
+-- P.S there are ~1% customers whose had orders before create_Date
+-- Reactivated logic: DATE_DIFF( prior_purchase, reactivated_purch, DAY) > 365
+select 
+r.customer_status,
+r.create_date,
+r.Order_Date,
+DATE_TRUNC(r.Order_Date,month) as Order_Month,
+r.gender_type_cd,
+count(distinct r.iid) as iid_count
+
+--checking
+--select distinct iid
+from 
+(select
+d.*,
+case when  d.order_date= d.create_date
+          then 'New'
+    when d.order_date > date_add(lag(d.order_date) over (partition by d.iid order by d.order_date), interval 365 day) --comparing to the next record
+                        
+          then 'Reactivated'
+     else 'Returning'
+    end as customer_status
+from
+(select 
+    distinct oh.iid,
+    i.gender_type_cd,
+    i.create_date,
+    oh.order_date, 
+    ROW_NUMBER() OVER(PARTITION BY oh.iid order by oh.order_date ) as order_Num
+  from `merkle-lake-hbft-user.analytics.vw_order_header` oh
+  join `merkle-lake-hbft-user.analytics.vw_indiv` i
+      on oh.IID = i.IID
+  where 
+    i.create_date<= oh.order_date
+    and DATE_TRUNC(oh.Order_Date,WEEK(MONDAY)) >= date_add(current_date(),interval -1095 DAY) -- looking at past three years data
+    and oh.IID > 0
+    and upper(oh.Order_Status) != 'CANCELLED'
+    and oh.Sales>0
+  order by 1,2,3 desc
+--limit 10000000
+)d
+--example
+--where iid = 100000848236062  or iid =100000667396909
+order by d.iid, d.order_date desc
+)r
+where 
+--ORIGINAL FILTER:
+--extract(year from date_trunc(order_date,week(MONDAY)))>=2020
+--NEW FILTER
+order_date >= '2019-01-01'
+GROUP BY 1,2,3,4,5
+;

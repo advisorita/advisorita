@@ -1,0 +1,79 @@
+/*select distinct --a.CampaignId ,
+a.ConversionCategoryName , a.ConversionTypeName , sum(a.AllConversions) as c, sum(a.AllConversionValue ) as v
+from analytics.AdCrossDeviceConversionStats_8099319219 a
+where --campaignid = 9817601250 and 
+ConversionTypeName in ('Credit Card Approvals',
+'Offline Purchase - Existing Customers',
+'Offline Purchase - New Customers')
+group by 1,2
+;
+*/
+with existing as
+(select a.CreativeId as ad_id, a.Date, sum(a.AllConversions ) as Purchase_ExistingCustomer_Conversions, sum(a.AllConversionValue ) as Purchase_ExistingCustomer_Conversion_value
+from analytics.AdCrossDeviceConversionStats_8099319219 a
+where a.ConversionTypeName ='Offline Purchase - Existing Customers'
+group by 1,2
+)
+select 
+'Google' as Platform,
+coalesce(fcc.ad_id, fcn.ad_id ,fce.ad_id,fss.ad_id ,gsv.ad_id  ) as Ad_Id, 
+coalesce(fcc.date, fcn.date ,fce.date,fss.date,gsv.date ) as date,
+fcc.Purchase_ExistingCustomer_Conversions, fcc.Purchase_ExistingCustomer_Conversion_value, 
+fcn.Purchase_NewCustomer_Conversions ,fcn.Purchase_NewCustomer_Conversion_value , 
+fce.PLCC_Conversions  , fce.PLCC_Conversion_value,
+fss.Store_Sales_Conversions,fss.Store_Sales_Conversion_value,
+gsv.Store_visits,
+gsv.Store_visits_value      
+from existing fcc
+full outer join 
+(
+select distinct creativeid as ad_id, date, sum(AllConversions) as Purchase_NewCustomer_Conversions, sum(AllConversionValue) as Purchase_NewCustomer_Conversion_value 
+from analytics.AdCrossDeviceConversionStats_8099319219
+where ConversionTypeName =/*new*/ 'Offline Purchase - New Customers'
+group by 1,2
+) fcn
+on fcc.ad_id = fcn.ad_id and fcc.date = fcn.date 
+full outer join 
+(
+select distinct
+fcc.CreativeId as ad_id, fcc.date, sum(fcc.AllConversions ) as PLCC_Conversions, sum(fcc.AllConversionValue ) as PLCC_Conversion_value 
+from analytics.AdCrossDeviceConversionStats_8099319219 fcc
+where ConversionTypeName =/*plcc*/ 'Credit Card Approvals'
+group by 1,2
+) fce
+on fcc.ad_id = fce.ad_id and fcc.date = fce.date 
+/************  GOOGLE STORE SALES  ***********/
+--Rita Added Store Sales 04/19/2021
+FULL OUTER JOIN (
+  SELECT
+    DISTINCT fss.CreativeId AS ad_id,
+    fss.date,
+    SUM(fss.AllConversions ) AS Store_Sales_Conversions,
+    SUM(fss.AllConversionValue ) AS Store_Sales_Conversion_value
+  FROM
+    analytics.AdCrossDeviceConversionStats_8099319219 fss
+  WHERE
+    ConversionTypeName = 'Store sales' /*store sales*/
+  GROUP BY
+    1, 2 ) fss
+ON
+  fcc.ad_id = fss.ad_id
+  AND fcc.date = fss.date
+/************  GOOGLE STORE VISITS  ***********/
+--Rita Added Store visits 06/23/2021
+FULL OUTER JOIN (
+  SELECT
+    DISTINCT gsv.CreativeId AS ad_id,
+    gsv.date,
+    SUM(gsv.AllConversions ) AS Store_visits,
+    SUM(gsv.AllConversionValue ) AS Store_visits_value
+  FROM
+    analytics.AdCrossDeviceConversionStats_8099319219 gsv
+  WHERE
+    ConversionTypeName = 'Store visits' /*store sales*/
+  GROUP BY
+    1, 2 ) gsv
+ON
+  fcc.ad_id = gsv.ad_id
+  AND fcc.date = gsv.date
+  ;
